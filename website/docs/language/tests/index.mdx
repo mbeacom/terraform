@@ -633,3 +633,11 @@ run "one" {
   ]
 }
 ```
+
+>> **Note**: Failures are only expected in the operation specified by the `command` attribute of the `run` block.
+
+This means you should be careful when using `expect_failures` in `run` blocks with `command = apply`. A `run` block with `command = apply` that expects a custom condition failure will fail overall if that custom condition fails during the plan.
+
+This is logically consistent, as the `run` block is expecting to be able to run an apply operation but cannot as the plan failed. It is also potentially confusing, as you will see the failure reported in the diagnostics as the reason the test failed even though that failure was marked as being expected.
+
+There are instances when a custom condition will not be executed during the planning stage as it is relying on computed attributes only available after a referenced resource has been created. In these cases an `expect_failures` block alongside a `command = apply` attribute and value would be expected and acceptable. However, in most cases you should ensure that `expect_failures` are used only alongside `command = plan` operations.

@@ -1054,7 +1054,7 @@
   },
   { "title": "Tests", "path": "tests" },
   {
-    "title": "Upgrading to Terraform v1.5",
+    "title": "Upgrading to Terraform v1.6",
     "path": "upgrade-guides"
   },
   {

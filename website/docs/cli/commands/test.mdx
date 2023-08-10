@@ -24,9 +24,13 @@ Terraform will then execute a series of Terraform plan or apply commands, accord
 
 The following options apply to the Terraform `test` command:
 
+* `-filter=testfile` Limits the `terraform test` operation only to the specified test files.
+
 * `-json` Displays machine-readable JSON output for the testing results.
 
 * `-test-directory=<relative directory>` Override the directory that Terraform will look into for testing files. Note, Terraform always loads testing files within the main configuration directory. The default testing directory is `tests`.
+
+* `-verbose` Prints out the state for each `command=apply` `run` block after execution, or the plan for each `command=plan` `run` block.
 
 ## State Management
 

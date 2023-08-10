@@ -10,15 +10,21 @@ description: >-
 
 Terraform tests allow module authors to validate the functionality of their modules during development and prior to release.
 
+## Types of Tests
+
+The default use case for the testing framework is a kind of integration testing. This is because the default value for the `command` attribute in each [`run`](#run-blocks) block (discussed below) is `apply`. This means that Terraform will attempt to execute a complete `apply` operation against the configuration under test which will create real infrastructure that can then be validated by the testing framework.
+
+It is possible to simulate more local and fine-grained unit testing behaviour with the use of the `command = plan` attribute and value in a given `run` block. This means that Terraform will only produce a potential plan that will not be applied, and the values in the plan can be validated. This functionality can be used to check logical operations within your configuration, and validate custom conditions within resources, variables, and outputs without creating real infrastructure.
+
 ## Syntax
 
-Each Terraform test is contained within a test file. Test files are discovered by Terraform due to their file extension: `.tftest.hcl`.
+Each Terraform test is contained within a test file. Test files are discovered by Terraform due to their file extension: `.tftest.hcl` or `.tftest.json`.
 
 Each test file contains the following root level attributes and blocks:
 
-- One to many [`run`](#run-blocks) blocks.
 - Zero to one [`variables`](#variables) block.
 - Zero to many [`provider`](#providers) blocks.
+- One to many [`run`](#run-blocks) blocks.
 
 The `run` blocks are executed in order, simulating a series of Terraform commands being executed directly within the configuration directory. The order of the `variables` and `provider` blocks doesn't matter, all values within these blocks are processed once at the beginning of the test operation. A well laid out test file has the `variables` and `provider` blocks defined first, at the beginning of the file.
 
@@ -65,7 +71,7 @@ run "valid_string_concat" {
 }
 ```
 
-The above test file runs a single Terraform apply command which creates the S3 bucket, and then validates the logic for calculating the name is correct by checking the actual name matches the expected name.
+The above test file runs a single Terraform plan command which creates the S3 bucket, and then validates the logic for calculating the name is correct by checking the actual name matches the expected name.
 
 ### Run blocks
 
@@ -83,7 +89,7 @@ Each `run` block has the following fields and blocks:
 - Zero to many [`assert`](#assertions) blocks.
 - Zero to one [`expect_failures`](#expecting-failures) attribute.
 
-The `command` attribute and `plan_options` block tell Terraform which command and options to execute for each run block. The default operation, if neither the `command` attribute nor the `plan_options` block is specified is normal Terraform apply operation.
+The `command` attribute and `plan_options` block tell Terraform which command and options to execute for each run block. The default operation, if neither the `command` attribute nor the `plan_options` block is specified is a normal Terraform apply operation.
 
 The `command` attribute is simple, stating whether the operation should be a [`plan`](/terraform/cli/commands/plan) or an [`apply`](/terraform/cli/commands/apply) operation.
 
@@ -143,8 +149,6 @@ run "overrides_root_level_value" {
 }
 ```
 
->> **Note:** You still must specify a value for all required variables in your configuration at the root level, even if each run block provides their own values. Terraform destroys any created infrastructure at the end of each test file, and requires all variables set for this operation.
-
 #### Variables on the Command Line and Definition Files
 
 In addition to values provided via test files, the Terraform `test` command also supports the alternate input mechanisms supported by other commands.
@@ -167,7 +171,7 @@ By default, within each `run` block all defined providers will be made directly 
 
 If no provider configuration is provided within a testing file, Terraform will attempt to initialize any providers within the configuration using their default settings. For example, any environment variables aimed at configuring providers will still be available and will be used by Terraform to create default providers.
 
-Extending the previous [example](#example) to allow our tests to specify the region instead of the configuration:
+Extending the previous [example](#example) to allow our tests, instead of the configuration, to specify the region:
 
 ```hcl
 # main.tf
@@ -361,8 +365,6 @@ run "providers" {
 
 > **Note:** When running tests in `apply` mode switching providers between `run` blocks can result in failed operations and tests as resources created by one provider definition will be unusable when modified by a second.
 
-> **Warning:** As Terraform executes a destroy operation at the conclusion of each test file you must provide adequate provider definitions at the file level such that Terraform can infer the correct providers to use during the destroy operation.
-
 ### Modules
 
 You can also modify the module that a given `run` block will execute.
@@ -375,7 +377,7 @@ Compared with the traditional [`module` block](/terraform/language/modules/synta
 
 All other blocks and attributes within the `run` block are supported when executing an alternate module, with `assert` blocks executing against values from the alternate module. This is discussed more in [Modules State](#modules-state).
 
-There are two targeted use cases for the `modules` block within a Testing file:
+Here are two example use cases for the `modules` block within a Testing file:
 
 1. A setup module to create necessary infrastructure required by the main configuration under test.
 2. A loading module to load and validate secondary infrastructure (such as data sources) not created directly by the main configuration under test.
@@ -482,15 +484,93 @@ run "verify" {
 
 #### Modules State
 
-Terraform maintains the [state](/terraform/language/state) of each testing file within memory, as it sequentially executes the `run` blocks. This behaviour would break down when attempting to load different configurations into the same state. Therefore, whenever alternate modules are loaded into `run` blocks a new empty state is loaded and populated.
+During a `terraform test` execution Terraform will maintain at least one but possibly many state files within memory for each test file it executes.
 
-In other words, any `run` blocks that execute against the main configuration share and update the same state sequentially while `run` blocks executing against other modules always execute in an isolated sandbox. This means that alternate modules cannot be used to interact directly with the state and infrastructure from the configuration under test.
+There is always at least one state file that maintains the state of the main configuration under test. This is shared by all `run` blocks that execute without a `module` block specifying an alternate module to load.
+
+In addition, there is one state file per alternate module loaded. An alternate module state file is shared by all `run` blocks that execute the given module.
 
 The Terraform team is interested in any use cases that would require manual state management, or the ability to execute different configurations against the same state, within the `test` command. If you have a use case for this please file an [issue](https://github.com/hashicorp/terraform/issues/new/choose) and share it with us.
 
+The following example uses comments to highlight where the state files for each `run` block are coming from. During the example a total of three state files will be created and managed, one for the main configuration under test, one for the setup module, and one for the loader module.
+
+```hcl
+run "setup" {
+
+  # This run block references an alternate module and is the first run block
+  # to reference this particular alternate module. Therefore, a new empty state
+  # file will be created and populated for this run block.
+
+  module {
+    source = "./testing/setup"
+  }
+}
+
+run "init" {
+
+  # This run block does not reference an alternate module so uses the main state
+  # file for the configuration under test. As this is the first run block to
+  # reference the main configuration, the state file would be empty to begin
+  # with and contain the resources created by this run block after.
+
+  assert {
+    # In practice we'd do some interesting checks and tests here but the
+    # assertions aren't important for this example.
+  }
+
+  # ... more assertions ...
+}
+
+run "update_setup" {
+
+  # We've now re-referenced the setup module, so the state file that was created
+  # for the first "setup" run block will be reused. It will contain any
+  # resources that were created as part of the other run block before this run
+  # block executes and will be updated with any changes made by this run block
+  # after.
+
+  module {
+    source = "./testing/setup"
+  }
+
+  variables {
+    # In practice, we'd likely make some changes to the module compared to the
+    # first run block here. Otherwise there would be no point recalling the
+    # module. However, the concrete changes aren't important to this example.
+  }
+}
+
+run "update" {
+
+  # As with the "init" run block we are executing against the main configuration
+  # again. This means we'd load the main state file that was initially populated
+  # by the "init" run block, and any changes made by this "run" block will be
+  # carried forward to any future run blocks that execute against the main
+  # configuration.
+
+  # ... updated variables ...
+
+  # ... assertions ...
+}
+
+run "loader" {
+
+  # This run block is now referencing our second alternate module so will create
+  # our third and final state file. The other two state files are managing
+  # resources from the main configuration and resources from the setup module.
+  # We are getting a new state file for this run block as the loader module has
+  # not previously been referenced by any run blocks.
+
+  module {
+    source = "./testing/loader"
+  }
+}
+
+```
+
 ##### Modules Cleanup
 
-Terraform will attempt to clean up every resource created during the execution of a test file. When alternate modules are loaded, the order in which objects are destroyed is important. For example, in our [Modules](#modules) example earlier we cannot destroy the resources created in the "setup" `run` block before the objects created in the "execute" `run` block.
+Terraform will attempt to clean up every resource created during the execution of a test file. When alternate modules are loaded, the order in which objects are destroyed is important. For example, in our first [Modules](#modules) example earlier we cannot destroy the resources created in the "setup" `run` block before the objects created in the "execute" `run` block.
 
 Terraform will destroy resources in the following order, and this order is important as it may affect the structure of your testing files:
 

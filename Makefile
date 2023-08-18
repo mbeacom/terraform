@@ -2,7 +2,7 @@
 # source files, except the protobuf stubs which are built instead with
 # "make protobuf".
 generate:
-	go generate ./...
+	go generate -tags tools ./...
 
 # We separate the protobuf generation because most development tasks on
 # Terraform do not involve changing protobuf files and protoc is not a
@@ -25,9 +25,6 @@ staticcheck:
 
 exhaustive:
 	"$(CURDIR)/scripts/exhaustive.sh"
-
-copyright:
-	"$(CURDIR)/scripts/copyright.sh"
 
 # Run this if working on the website locally to run in watch mode.
 website:
